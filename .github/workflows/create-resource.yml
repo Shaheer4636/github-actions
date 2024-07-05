@@ -1,4 +1,4 @@
-name: Create AWS S3 Bucket
+name: Create Resources
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  create-s3-bucket:
+  create-resources:
     runs-on: ubuntu-latest
 
     steps:
@@ -15,21 +15,88 @@ jobs:
       uses: actions/checkout@v2
 
     - name: Install jq
-      run: sudo apt-get install jq
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y jq
 
     - name: Parse JSON file
       id: parse_json
       run: |
-        bucket_name=$(jq -r '.BucketName' resource.json)
-        echo "::set-output name=bucket_name::$bucket_name"
+        platform_type=$(jq -r '.PlatformType' resource.json)
+        echo "::set-output name=platform_type::$platform_type"
+        resources=$(jq -c '.Resources[]' resource.json)
+        echo "::set-output name=resources::$resources"
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v1
+    - name: Configure Terraform
+      uses: hashicorp/setup-terraform@v1
       with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: us-east-1
+        terraform_version: 1.0.11
 
-    - name: Create S3 bucket
+    - name: Initialize Terraform
+      run: terraform init
+
+    - name: Create Resources
       run: |
-        aws s3api create-bucket --bucket ${{ steps.parse_json.outputs.bucket_name }} --region us-east-1
+        # Define a function to apply Terraform for a given resource
+        apply_terraform() {
+          local resource_type=$1
+          local resource_name=$2
+          local resource_config=$3
+
+          echo "Creating $resource_type named $resource_name"
+          
+          # Generate a Terraform config dynamically for each resource type
+          case $resource_type in
+            S3)
+              echo "resource \"aws_s3_bucket\" \"$resource_name\" {
+                bucket = \"$resource_name\"
+              }" > main.tf
+              ;;
+            EC2)
+              ami=$(echo $resource_config | jq -r '.Ami')
+              instance_type=$(echo $resource_config | jq -r '.InstanceType')
+              echo "resource \"aws_instance\" \"$resource_name\" {
+                ami           = \"$ami\"
+                instance_type = \"$instance_type\"
+              }" > main.tf
+              ;;
+            SNS)
+              echo "resource \"aws_sns_topic\" \"$resource_name\" {
+                name = \"$resource_name\"
+              }" > main.tf
+              ;;
+            *)
+              echo "Unsupported resource type: $resource_type"
+              return 1
+              ;;
+          esac
+
+          terraform init
+          terraform apply -auto-approve
+        }
+
+        resources="${{ steps.parse_json.outputs.resources }}"
+
+        for resource in $(echo "${resources}" | jq -r '. | @base64'); do
+          _jq() {
+            echo ${resource} | base64 --decode | jq -r ${1}
+          }
+
+          resource_type=$(_jq '.ResourceType')
+          resource_name=$(_jq '.ResourceName')
+          resource_config=$(_jq '.')
+
+          apply_terraform $resource_type $resource_name "$resource_config"
+        done
+
+    # Handling for Databricks and Snowflake
+    - name: Process Databricks and Snowflake
+      if: ${{ steps.parse_json.outputs.platform_type == 'DATABRICK' || steps.parse_json.outputs.platform_type == 'DATAFLAKE' }}
+      run: |
+        if [[ "${{ steps.parse_json.outputs.platform_type }}" == "DATABRICK" ]]; then
+          echo "Processing Databricks resources..."
+          # Add your Databricks related commands here
+        elif [[ "${{ steps.parse_json.outputs.platform_type }}" == "DATAFLAKE" ]]; then
+          echo "Processing Snowflake resources..."
+          # Add your Snowflake related commands here
+        fi
