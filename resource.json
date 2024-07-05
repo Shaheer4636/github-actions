@@ -1,19 +1,19 @@
 {
-      "PlatformType": "AWS",
-      "Resources": [
-        {
-          "ResourceType": "S3",
-          "ResourceName": "my-s3-bucket"
-        },
-        {
-          "ResourceType": "EC2",
-          "ResourceName": "my-ec2-instance",
-          "Ami": "ami-12345678",
-          "InstanceType": "t2.micro"
-        },
-        {
-          "ResourceType": "SNS",
-          "ResourceName": "my-sns-topic"
-        }
-      ]
+  "PlatformType": "AWS",
+  "Resources": [
+    {
+      "ResourceType": "S3",
+      "ResourceName": "my-s3-bucket"
+    },
+    {
+      "ResourceType": "EC2",
+      "ResourceName": "my-ec2-instance",
+      "Ami": "ami-12345678",
+      "InstanceType": "t2.micro"
+    },
+    {
+      "ResourceType": "SNS",
+      "ResourceName": "my-sns-topic"
     }
+  ]
+}
