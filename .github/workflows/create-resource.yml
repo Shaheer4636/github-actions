@@ -102,13 +102,40 @@ jobs:
         terraform apply -auto-approve
 
     # Processing resources for Databricks and Snowflake
-    - name: Process Databricks and Snowflake
-      if: ${{ env.platform_type == 'DATABRICK' || env.platform_type == 'DATAFLAKE' }}
+    - name: Process Databricks
+      if: ${{ env.platform_type == 'DATABRICK' }}
       run: |
-        if [ "$platform_type" == "DATABRICK" ]; then
-          echo "Processing Databricks resources..."
-          # Add your Databricks related commands here
-        elif [ "$platform_type" == "DATAFLAKE" ]; then
-          echo "Processing Snowflake resources..."
-          # Add your Snowflake related commands here
-        fi
+        num_resources=${{ env.num_resources }}
+
+        for ((i=0; i<$num_resources; i++)); do
+          resource_type=$(eval echo "\${resource_${i}_type}")
+          resource_name=$(eval echo "\${resource_${i}_name}")
+          resource_config=$(eval echo "\${resource_${i}_config}")
+
+          echo "Creating Databricks resource: Type=$resource_type, Name=$resource_name"
+
+          case $resource_type in
+            CLUSTER)
+              cluster_config=$(echo $resource_config | jq -r '.ClusterConfig')
+              echo "Setting up Databricks Cluster ${resource_name} with config ${cluster_config}"
+              # Add your Databricks cluster creation command here
+              databricks clusters create --json "$cluster_config"
+              ;;
+            JOB)
+              job_config=$(echo $resource_config | jq -r '.JobConfig')
+              echo "Setting up Databricks Job ${resource_name} with config ${job_config}"
+              # Add your Databricks job creation command here
+              databricks jobs create --json "$job_config"
+              ;;
+            *)
+              echo "Unsupported Databricks resource type: $resource_type"
+              exit 1
+              ;;
+          esac
+        done
+
+    - name: Process Snowflake
+      if: ${{ env.platform_type == 'DATAFLAKE' }}
+      run: |
+        echo "Processing Snowflake resources..."
+        # Add your Snowflake related commands here
