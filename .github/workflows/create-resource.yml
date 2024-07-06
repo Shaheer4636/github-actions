@@ -14,14 +14,9 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v2
 
-    - name: Install jq tool for JSON processing
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y jq
-
     - name: Install and Upgrade Python Packages
       run: |
-        sudo apt-get install -y python3-pip expect
+        sudo apt-get install -y python3-pip
         pip3 install --upgrade "urllib3<2" "chardet<4" requests
 
     - name: Install Databricks CLI
@@ -30,6 +25,7 @@ jobs:
 
     - name: Configure Databricks CLI using expect
       run: |
+        sudo apt-get install -y expect
         expect <<EOF
         spawn databricks configure --token
         expect "Databricks Host (should begin with https://):"
@@ -46,24 +42,31 @@ jobs:
     - name: Parse JSON file and set environment variables
       id: parse_json
       run: |
-        platform_type=$(jq -r '.PlatformType' resource.json)
-        echo "platform_type=$platform_type" >> $GITHUB_ENV
-        echo "Platform type is $platform_type"
-        
-        resources=$(jq '.Resources | length' resource.json)
-        echo "num_resources=$resources" >> $GITHUB_ENV
-        echo "Number of resources is $resources"
+        python3 <<EOF
+        import json
+        import os
 
-        for ((i=0; i<$resources; i++)); do
-          resource=$(jq -c .Resources[$i] resource.json)
-          resource_type=$(echo $resource | jq -r '.ResourceType')
-          resource_name=$(echo $resource | jq -r '.ResourceName')
-          echo "resource_${i}_type=$resource_type" >> $GITHUB_ENV
-          echo "resource_${i}_name=$resource_name" >> $GITHUB_ENV
-          echo "resource_${i}_config=$resource" >> $GITHUB_ENV
+        with open('resource.json') as f:
+            data = json.load(f)
 
-          echo "Resource $i: type=$resource_type, name=$resource_name, config=$resource"
-        done
+        os.environ['platform_type'] = data['PlatformType']
+        print(f"::set-env name=platform_type::{data['PlatformType']}")
+
+        resources = data['Resources']
+        os.environ['num_resources'] = str(len(resources))
+        print(f"::set-env name=num_resources::{len(resources)}")
+
+        for i, resource in enumerate(resources):
+            os.environ[f"resource_{i}_type"] = resource['ResourceType']
+            os.environ[f"resource_{i}_name"] = resource['ResourceName']
+            os.environ[f"resource_{i}_config"] = json.dumps(resource)
+
+            print(f"::set-env name=resource_{i}_type::{resource['ResourceType']}")
+            print(f"::set-env name=resource_{i}_name::{resource['ResourceName']}")
+            print(f"::set-env name=resource_{i}_config::{json.dumps(resource)}")
+
+            print(f"Resource {i}: type={resource['ResourceType']}, name={resource['ResourceName']}, config={resource}")
+        EOF
 
     - name: Configure Terraform
       uses: hashicorp/setup-terraform@v1
