@@ -21,6 +21,17 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y jq
 
+    # Install Databricks CLI
+    - name: Install Databricks CLI
+      run: |
+        sudo apt-get install -y python3-pip
+        pip3 install databricks-cli
+
+    # Configure Databricks CLI
+    - name: Configure Databricks CLI
+      run: |
+        databricks configure --token <<< "${{ secrets.DATABRICKS_HOST }}\n${{ secrets.DATABRICKS_TOKEN }}"
+
     # Parse the JSON file and set environment variables
     - name: Parse JSON file
       id: parse_json
@@ -44,28 +55,25 @@ jobs:
           echo "Resource $i: type=$resource_type, name=$resource_name, config=$resource"
         done
 
-    # Configure Terraform CLI
     - name: Configure Terraform
       uses: hashicorp/setup-terraform@v1
       with:
         terraform_version: 1.0.11
 
-    # Set up AWS credentials from secrets if applicable
     - name: Configure AWS credentials
       if: env.platform_type == 'AWS'
       uses: aws-actions/configure-aws-credentials@v1
       with:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: us-east-1  # Update to the appropriate AWS region
+        aws-region: us-east-1
 
-    # Create AWS resources based on parsed JSON configuration
     - name: Create AWS Resources
       if: env.platform_type == 'AWS'
       run: |
         num_resources=${{ env.num_resources }}
-        rm -f main.tf   # Ensure main.tf is clean before starting
-
+        rm -f main.tf
+        
         for ((i=0; i<$num_resources; i++)); do
           resource_type=$(eval echo "\${resource_${i}_type}")
           resource_name=$(eval echo "\${resource_${i}_name}")
@@ -102,7 +110,6 @@ jobs:
         terraform init
         terraform apply -auto-approve
 
-    # Processing resources for Databricks
     - name: Process Databricks
       if: ${{ env.platform_type == 'DATABRICK' }}
       run: |
@@ -122,13 +129,11 @@ jobs:
             CLUSTER)
               cluster_config=$(echo $resource_config | jq -r '.ClusterConfig')
               echo "Setting up Databricks Cluster ${resource_name} with config ${cluster_config}"
-              # Add your Databricks cluster creation command here
               databricks clusters create --json "$cluster_config"
               ;;
             JOB)
               job_config=$(echo $resource_config | jq -r '.JobConfig')
               echo "Setting up Databricks Job ${resource_name} with config ${job_config}"
-              # Add your Databricks job creation command here
               databricks jobs create --json "$job_config"
               ;;
             *)
@@ -138,7 +143,6 @@ jobs:
           esac
         done
 
-    # Processing resources for Snowflake
     - name: Process Snowflake
       if: ${{ env.platform_type == 'DATAFLAKE' }}
       run: |
