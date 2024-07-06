@@ -26,7 +26,7 @@ jobs:
         echo "platform_type=$platform_type" >> $GITHUB_ENV
         resources=$(jq '.Resources | length' resource.json)
         echo "num_resources=$resources" >> $GITHUB_ENV
-        
+
         for ((i=0; i<$resources; i++)); do
           resource=$(jq -c .Resources[$i] resource.json)
           resource_type=$(echo $resource | jq -r '.ResourceType')
@@ -49,27 +49,84 @@ jobs:
           resource_type=$(eval echo "\${resource_${i}_type}")
           resource_name=$(eval echo "\${resource_${i}_name}")
           resource_config=$(eval echo "\${resource_${i}_config}")
-          
+
           echo "Creating $resource_type named $resource_name"
-          
+
           case $resource_type in
             S3)
-              echo "resource \"aws_s3_bucket\" \"$resource_name\" {
-                bucket = \"$resource_name\"
-              }" > main.tf
+              cat <<EOF > main.tf
+              terraform {
+                required_providers {
+                  aws = {
+                    source = "hashicorp/aws"
+                    version = "~> 3.0"
+                  }
+                }
+              }
+
+              provider "aws" {
+                region = var.aws_region
+              }
+
+              resource "aws_s3_bucket" "$resource_name" {
+                bucket = "$resource_name"
+              }
+
+              variable "aws_region" {
+                default = "us-east-1" # Replace with your default region or manage it dynamically
+              }
+              EOF
               ;;
             EC2)
               ami=$(echo $resource_config | jq -r '.Ami')
               instance_type=$(echo $resource_config | jq -r '.InstanceType')
-              echo "resource \"aws_instance\" \"$resource_name\" {
-                ami           = \"$ami\"
-                instance_type = \"$instance_type\"
-              }" > main.tf
+              cat <<EOF > main.tf
+              terraform {
+                required_providers {
+                  aws = {
+                    source = "hashicorp/aws"
+                    version = "~> 3.0"
+                  }
+                }
+              }
+
+              provider "aws" {
+                region = var.aws_region
+              }
+
+              resource "aws_instance" "$resource_name" {
+                ami           = "$ami"
+                instance_type = "$instance_type"
+              }
+
+              variable "aws_region" {
+                default = "us-east-1" # Replace with your default region or manage it dynamically
+              }
+              EOF
               ;;
             SNS)
-              echo "resource \"aws_sns_topic\" \"$resource_name\" {
-                name = \"$resource_name\"
-              }" > main.tf
+              cat <<EOF > main.tf
+              terraform {
+                required_providers {
+                  aws = {
+                    source = "hashicorp/aws"
+                    version = "~> 3.0"
+                  }
+                }
+              }
+
+              provider "aws" {
+                region = var.aws_region
+              }
+
+              resource "aws_sns_topic" "$resource_name" {
+                name = "$resource_name"
+              }
+
+              variable "aws_region" {
+                default = "us-east-1" # Replace with your default region or manage it dynamically
+              }
+              EOF
               ;;
             *)
               echo "Unsupported resource type: $resource_type"
