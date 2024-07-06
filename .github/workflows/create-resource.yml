@@ -23,17 +23,18 @@ jobs:
       id: parse_json
       run: |
         platform_type=$(jq -r '.PlatformType' resource.json)
-        echo "::set-output name=platform_type::$platform_type"
+        echo "platform_type=$platform_type" >> $GITHUB_ENV
         resources=$(jq '.Resources | length' resource.json)
+        echo "num_resources=$resources" >> $GITHUB_ENV
+
         for ((i=0; i<$resources; i++)); do
           resource=$(jq -c .Resources[$i] resource.json)
           resource_type=$(echo $resource | jq -r '.ResourceType')
           resource_name=$(echo $resource | jq -r '.ResourceName')
-          echo "::set-output name=resource_${i}_type::$resource_type"
-          echo "::set-output name=resource_${i}_name::$resource_name"
-          echo "::set-output name=resource_${i}_config::$(echo $resource)"
+          echo "resource_${i}_type=$resource_type" >> $GITHUB_ENV
+          echo "resource_${i}_name=$resource_name" >> $GITHUB_ENV
+          echo "resource_${i}_config=$(echo $resource)" >> $GITHUB_ENV
         done
-        echo "::set-output name=num_resources::$resources"
 
     - name: Configure Terraform
       uses: hashicorp/setup-terraform@v1
@@ -41,13 +42,13 @@ jobs:
         terraform_version: 1.0.11
 
     - name: Create AWS Resources
-      if: ${{ steps.parse_json.outputs.platform_type == 'AWS' }}
+      if: ${{ env.platform_type == 'AWS' }}
       run: |
-        num_resources=${{ steps.parse_json.outputs.num_resources }}
+        num_resources=${{ env.num_resources }}
         for ((i=0; i<$num_resources; i++)); do
-          resource_type=${{ steps.parse_json.outputs['resource_' + i + '_type'] }}
-          resource_name=${{ steps.parse_json.outputs['resource_' + i + '_name'] }}
-          resource_config=${{ steps.parse_json.outputs['resource_' + i + '_config'] }}
+          resource_type=${{ env[format('resource_%s_type', i)] }}
+          resource_name=${{ env[format('resource_%s_name', i)] }}
+          resource_config=${{ env[format('resource_%s_config', i)] }}
           
           echo "Creating $resource_type named $resource_name"
           
@@ -80,15 +81,13 @@ jobs:
           terraform apply -auto-approve
         done
 
-    # Handling for Databricks and Snowflake
     - name: Process Databricks and Snowflake
-      if: ${{ steps.parse_json.outputs.platform_type == 'DATABRICK' || steps.parse_json.outputs.platform_type == 'DATAFLAKE' }}
+      if: ${{ env.platform_type == 'DATABRICK' || env.platform_type == 'DATAFLAKE' }}
       run: |
-        platform_type=${{ steps.parse_json.outputs.platform_type }}
-        if [[ "$platform_type" == "DATABRICK" ]]; then
+        if [[ "${{ env.platform_type }}" == "DATABRICK" ]]; then
           echo "Processing Databricks resources..."
           # Add your Databricks related commands here
-        elif [[ "$platform_type" == "DATAFLAKE" ]]; then
+        elif [[ "${{ env.platform_type }}" == "DATAFLAKE" ]]; then
           echo "Processing Snowflake resources..."
           # Add your Snowflake related commands here
         fi
