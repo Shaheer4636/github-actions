@@ -3,7 +3,7 @@
   "Resources": [
     {
       "ResourceType": "CLUSTER",
-      "ResourceName": "databricks-cluster",
+      "ResourceName": "a-databricks-cluster",
       "ClusterConfig": {
         "cluster_name": "my-databricks-cluster",
         "spark_version": "7.3.x-scala2.12",
