@@ -11,14 +11,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    # Checkout the repository
     - name: Checkout repository
       uses: actions/checkout@v2
 
+    # Install jq tool for JSON processing
     - name: Install jq
       run: |
         sudo apt-get update
         sudo apt-get install -y jq
 
+    # Parse the JSON file and set environment variables
     - name: Parse JSON file
       id: parse_json
       run: |
@@ -41,22 +44,32 @@ jobs:
           echo "Resource $i: type=$resource_type, name=$resource_name, config=$resource"
         done
 
+    # Configure Terraform CLI
     - name: Configure Terraform
       uses: hashicorp/setup-terraform@v1
       with:
         terraform_version: 1.0.11
 
+    # Set up AWS credentials from secrets
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1  # Update to the appropriate AWS region
+
+    # Create AWS resources based on parsed JSON configuration
     - name: Create AWS Resources
       if: env.platform_type == 'AWS'
       run: |
         num_resources=${{ env.num_resources }}
         rm -f main.tf   # Ensure main.tf is clean before starting
-        
+
         for ((i=0; i<$num_resources; i++)); do
           resource_type=$(eval echo "\${resource_${i}_type}")
           resource_name=$(eval echo "\${resource_${i}_name}")
           resource_config=$(eval echo "\${resource_${i}_config}")
-          
+
           echo "Creating $resource_type named $resource_name"
 
           case $resource_type in
@@ -88,6 +101,7 @@ jobs:
         terraform init
         terraform apply -auto-approve
 
+    # Processing resources for Databricks and Snowflake
     - name: Process Databricks and Snowflake
       if: ${{ env.platform_type == 'DATABRICK' || env.platform_type == 'DATAFLAKE' }}
       run: |
