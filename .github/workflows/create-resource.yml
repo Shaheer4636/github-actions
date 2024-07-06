@@ -26,7 +26,6 @@ jobs:
         echo "platform_type=$platform_type" >> $GITHUB_ENV
         resources=$(jq '.Resources | length' resource.json)
         echo "num_resources=$resources" >> $GITHUB_ENV
-
         for ((i=0; i<$resources; i++)); do
           resource=$(jq -c .Resources[$i] resource.json)
           resource_type=$(echo $resource | jq -r '.ResourceType')
@@ -68,8 +67,8 @@ provider "aws" {
   region = var.aws_region
 }
 
-resource "aws_s3_bucket" "$resource_name" {
-  bucket = "$resource_name"
+resource "aws_s3_bucket" "${resource_name}" {
+  bucket = "${resource_name}"
 }
 
 variable "aws_region" {
@@ -94,9 +93,9 @@ provider "aws" {
   region = var.aws_region
 }
 
-resource "aws_instance" "$resource_name" {
-  ami           = "$ami"
-  instance_type = "$instance_type"
+resource "aws_instance" "${resource_name}" {
+  ami           = "${ami}"
+  instance_type = "${instance_type}"
 }
 
 variable "aws_region" {
@@ -104,7 +103,7 @@ variable "aws_region" {
 }
 EOF
               ;;
-            SNS)
+          SNS)
               cat <<EOF > main.tf
 terraform {
   required_providers {
@@ -119,8 +118,8 @@ provider "aws" {
   region = var.aws_region
 }
 
-resource "aws_sns_topic" "$resource_name" {
-  name = "$resource_name"
+resource "aws_sns_topic" "${resource_name}" {
+  name = "${resource_name}"
 }
 
 variable "aws_region" {
