@@ -1,15 +1,31 @@
- {
-      "PlatformType": "AWS",
-      "Resources": [
-        {
-          "ResourceType": "S3",
-          "ResourceName": "my-s3-bucket"
+{
+  "PlatformType": "DATABRICK",
+  "Resources": [
+    {
+      "ResourceType": "CLUSTER",
+      "ResourceName": "my-databricks-cluster",
+      "ClusterConfig": {
+        "cluster_name": "my-databricks-cluster",
+        "spark_version": "7.3.x-scala2.12",
+        "node_type_id": "i3.xlarge",
+        "num_workers": 2,
+        "autotermination_minutes": 20
+      }
+    },
+    {
+      "ResourceType": "JOB",
+      "ResourceName": "my-databricks-job",
+      "JobConfig": {
+        "name": "Demo Job",
+        "new_cluster": {
+          "spark_version": "7.3.x-scala2.12",
+          "node_type_id": "i3.xlarge",
+          "num_workers": 2
         },
-        {
-          "ResourceType": "EC2",
-          "ResourceName": "my-ec2-instance",
-          "Ami": "ami-06c68f701d8090592",
-          "InstanceType": "t2.micro"
+        "notebook_task": {
+          "notebook_path": "/Users/user@example.com/ExampleNotebook"
         }
-      ]
+      }
     }
+  ]
+}
