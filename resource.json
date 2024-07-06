@@ -8,7 +8,7 @@
         {
           "ResourceType": "EC2",
           "ResourceName": "my-ec2-instance",
-          "Ami": "ami-12345678",
+          "Ami": "ami-06c68f701d8090592",
           "InstanceType": "t2.micro"
         }
       ]
