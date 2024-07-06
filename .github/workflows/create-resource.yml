@@ -24,13 +24,13 @@ jobs:
     # Configure Databricks CLI
     - name: Configure Databricks CLI
       run: |
-        databricks configure --token <<< "${{ secrets.DATABRICKS_HOST }}\n${{ secrets.DATABRICKS_TOKEN }}"
+        echo "${{ secrets.DATABRICKS_HOST }}\n${{ secrets.DATABRICKS_TOKEN }}" | databricks configure --token
 
     # Parse the JSON file and set environment variables using Python
     - name: Parse JSON file with Python
       id: parse_json
       run: |
-        cat <<EOF > parse_json.py
+        python3 - <<'EOF'
 import json
 import os
 
@@ -56,8 +56,16 @@ for i, resource in enumerate(resources):
     print(f"resource_{i}_type={resource_type}")
     print(f"resource_{i}_name={resource_name}")
     print(f"resource_{i}_config={resource_config}")
+
+env_file_path = os.getenv('GITHUB_ENV')
+with open(env_file_path, 'a') as env_file:
+    env_file.write(f"platform_type={platform_type}\n")
+    env_file.write(f"num_resources={num_resources}\n")
+    for i in range(num_resources):
+        env_file.write(f"resource_{i}_type={os.environ[f'resource_{i}_type']}\n")
+        env_file.write(f"resource_{i}_name={os.environ[f'resource_{i}_name']}\n")
+        env_file.write(f"resource_{i}_config={os.environ[f'resource_{i}_config']}\n")
 EOF
-        python3 parse_json.py
 
     - name: Configure Terraform
       uses: hashicorp/setup-terraform@v1
