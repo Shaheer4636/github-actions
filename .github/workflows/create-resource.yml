@@ -31,41 +31,18 @@ jobs:
 
         with open('resource.json') as f:
             data = json.load(f)
-
-        outputs = {
-            'platform_type': data['PlatformType'],
-            'num_resources': len(data['Resources']),
-            'resources': data['Resources']
-        }
-
-        with open('outputs.json', 'w') as f:
-            json.dump(outputs, f)
+        
+        platform_type = data['PlatformType']
+        resources = data['Resources']
+        
+        print(f"::set-output name=platform_type::{platform_type}")
+        print(f"::set-output name=num_resources::{len(resources)}")
+        
+        for i, resource in enumerate(resources):
+            print(f"::set-output name=resource_{i}_type::{resource['ResourceType']}")
+            print(f"::set-output name=resource_{i}_name::{resource['ResourceName']}")
+            print(f"::set-output name=resource_{i}_config::{json.dumps(resource)}")
         EOF
-      continue-on-error: false
-
-    - name: Load parsed environment variables
-      id: load_outputs
-      run: |
-        cat outputs.json
-        platform_type=$(python3 -c "import json; print(json.load(open('outputs.json'))['platform_type'])")
-        num_resources=$(python3 -c "import json; print(json.load(open('outputs.json'))['num_resources'])")
-        
-        echo "::set-output name=platform_type::$platform_type"
-        echo "::set-output name=num_resources::$num_resources"
-        
-        echo "Platform type is $platform_type"
-        echo "Number of resources is $num_resources"
-      continue-on-error: false
-      
-    - name: Load individual resources
-      run: |
-        resources=$(python3 -c "import json; data=json.load(open('outputs.json'))['resources']; print(data)")
-
-        echo "${resources}" | jq -c '.[]' | while read resource; do
-          echo "resource_type=$(echo "${resource}" | jq -r '.ResourceType')" >> $GITHUB_ENV
-          echo "resource_name=$(echo "${resource}" | jq -r '.ResourceName')" >> $GITHUB_ENV
-          echo "resource_config=$(echo "${resource}" | jq -r '.')" >> $GITHUB_ENV
-        done
 
     - name: Configure Terraform
       uses: hashicorp/setup-terraform@v1
@@ -73,15 +50,15 @@ jobs:
         terraform_version: 1.0.11
 
     - name: Create AWS Resources
-      if: steps.load_outputs.outputs.platform_type == 'AWS'
+      if: steps.parse_json.outputs.platform_type == 'AWS'
       run: |
-        num_resources=${{ steps.load_outputs.outputs.num_resources }}
+        num_resources=${{ steps.parse_json.outputs.num_resources }}
         rm -f main.tf   # Ensure main.tf is clean before starting
 
-        for ((i=0; i<$num_resources; i++)); do
-          resource_type=$(eval echo "\${resource_type}")
-          resource_name=$(eval echo "\${resource_name}")
-          resource_config=$(eval echo "\${resource_config}")
+        for i in $(seq 0 $((num_resources-1))); do
+          resource_type=$(eval echo "${{ steps.parse_json.outputs.resource_${i}_type }}")
+          resource_name=$(eval echo "${{ steps.parse_json.outputs.resource_${i}_name }}")
+          resource_config=$(eval echo "${{ steps.parse_json.outputs.resource_${i}_config }}")
 
           echo "Creating $resource_type named $resource_name"
 
@@ -92,8 +69,8 @@ jobs:
               }" >> main.tf
               ;;
             EC2)
-              ami=$(echo $resource_config | jq -r '.Ami')
-              instance_type=$(echo $resource_config | jq -r '.InstanceType')
+              ami=$(echo $resource_config | python3 -c 'import sys, json; print(json.load(sys.stdin)["Ami"])')
+              instance_type=$(echo $resource_config | python3 -c 'import sys, json; print(json.load(sys.stdin)["InstanceType"])')
               echo "resource \"aws_instance\" \"$resource_name\" {
                 ami           = \"$ami\"
                 instance_type = \"$instance_type\"
@@ -115,25 +92,25 @@ jobs:
         terraform apply -auto-approve
 
     - name: Process Databricks
-      if: steps.load_outputs.outputs.platform_type == 'DATABRICK'
+      if: steps.parse_json.outputs.platform_type == 'DATABRICK'
       run: |
-        num_resources=${{ steps.load_outputs.outputs.num_resources }}
+        num_resources=${{ steps.parse_json.outputs.num_resources }}
 
-        for ((i=0; i<$num_resources; i++)); do
-          resource_type=$(eval echo "\${resource_type}")
-          resource_name=$(eval echo "\${resource_name}")
-          resource_config=$(eval echo "\${resource_config}")
+        for i in $(seq 0 $((num_resources-1))); do
+          resource_type=$(eval echo "${{ steps.parse_json.outputs.resource_${i}_type }}")
+          resource_name=$(eval echo "${{ steps.parse_json.outputs.resource_${i}_name }}")
+          resource_config=$(eval echo "${{ steps.parse_json.outputs.resource_${i}_config }}")
 
           echo "Creating Databricks resource: Type=$resource_type, Name=$resource_name"
 
           case $resource_type in
             CLUSTER)
-              cluster_config=$(echo $resource_config | jq -r '.ClusterConfig')
+              cluster_config=$(echo $resource_config | python3 -c 'import sys, json; print(json.load(sys.stdin)["ClusterConfig"])')
               echo "Setting up Databricks Cluster ${resource_name} with config ${cluster_config}"
               databricks clusters create --json "$cluster_config"
               ;;
             JOB)
-              job_config=$(echo $resource_config | jq -r '.JobConfig')
+              job_config=$(echo $resource_config | python3 -c 'import sys, json; print(json.load(sys.stdin)["JobConfig"])')
               echo "Setting up Databricks Job ${resource_name} with config ${job_config}"
               databricks jobs create --json "$job_config"
               ;;
@@ -145,15 +122,15 @@ jobs:
         done
 
     - name: Process Snowflake
-      if: steps.load_outputs.outputs.platform_type == 'DATAFLAKE'
+      if: steps.parse_json.outputs.platform_type == 'DATAFLAKE'
       run: |
         echo "Processing Snowflake resources..."
-        num_resources=${{ steps.load_outputs.outputs.num_resources }}
+        num_resources=${{ steps.parse_json.outputs.num_resources }}
 
-        for ((i=0; i<$num_resources; i++)); do
-          resource_type=$(eval echo "\${resource_type}")
-          resource_name=$(eval echo "\${resource_name}")
-          resource_config=$(eval echo "\${resource_config}")
+        for i in $(seq 0 $((num_resources-1))); do
+          resource_type=$(eval echo "${{ steps.parse_json.outputs.resource_${i}_type }}")
+          resource_name=$(eval echo "${{ steps.parse_json.outputs.resource_${i}_name }}")
+          resource_config=$(eval echo "${{ steps.parse_json.outputs.resource_${i}_config }}")
 
           echo "Creating Snowflake resource: Type=$resource_type, Name=$resource_name"
 
