@@ -26,7 +26,7 @@ jobs:
         echo "platform_type=$platform_type" >> $GITHUB_ENV
         resources=$(jq '.Resources | length' resource.json)
         echo "num_resources=$resources" >> $GITHUB_ENV
-
+        
         for ((i=0; i<$resources; i++)); do
           resource=$(jq -c .Resources[$i] resource.json)
           resource_type=$(echo $resource | jq -r '.ResourceType')
@@ -42,13 +42,13 @@ jobs:
         terraform_version: 1.0.11
 
     - name: Create AWS Resources
-      if: ${{ env.platform_type == 'AWS' }}
+      if: env.platform_type == 'AWS'
       run: |
         num_resources=${{ env.num_resources }}
         for ((i=0; i<$num_resources; i++)); do
-          resource_type=${{ env[format('resource_%s_type', i)] }}
-          resource_name=${{ env[format('resource_%s_name', i)] }}
-          resource_config=${{ env[format('resource_%s_config', i)] }}
+          resource_type=$(eval echo "\${resource_${i}_type}")
+          resource_name=$(eval echo "\${resource_${i}_name}")
+          resource_config=$(eval echo "\${resource_${i}_config}")
           
           echo "Creating $resource_type named $resource_name"
           
@@ -82,12 +82,12 @@ jobs:
         done
 
     - name: Process Databricks and Snowflake
-      if: ${{ env.platform_type == 'DATABRICK' || env.platform_type == 'DATAFLAKE' }}
+      if: env.platform_type == 'DATABRICK' || env.platform_type == 'DATAFLAKE'
       run: |
-        if [[ "${{ env.platform_type }}" == "DATABRICK" ]]; then
+        if [ "${{ env.platform_type }}" == "DATABRICK" ]; then
           echo "Processing Databricks resources..."
           # Add your Databricks related commands here
-        elif [[ "${{ env.platform_type }}" == "DATAFLAKE" ]]; then
+        elif [ "${{ env.platform_type }}" == "DATAFLAKE" ]; then
           echo "Processing Snowflake resources..."
           # Add your Snowflake related commands here
         fi
