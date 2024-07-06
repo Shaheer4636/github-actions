@@ -21,16 +21,24 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y jq
 
-    # Install Databricks CLI
+    # Install and set up Databricks CLI
     - name: Install Databricks CLI
       run: |
-        sudo apt-get install -y python3-pip
+        sudo apt-get install -y python3-pip expect
+        pip3 install --upgrade urllib3 chardet
         pip3 install databricks-cli
 
-    # Configure Databricks CLI
+    # Configure Databricks CLI using expect
     - name: Configure Databricks CLI
       run: |
-        databricks configure --token <<< "${{ secrets.DATABRICKS_HOST }}\n${{ secrets.DATABRICKS_TOKEN }}"
+        expect <<EOF
+        spawn databricks configure --token
+        expect "Databricks Host (should begin with https://):"
+        send "${{ secrets.DATABRICKS_HOST }}\r"
+        expect "Token:"
+        send "${{ secrets.DATABRICKS_TOKEN }}\r"
+        expect eof
+        EOF
 
     # Parse the JSON file and set environment variables
     - name: Parse JSON file
@@ -39,7 +47,7 @@ jobs:
         platform_type=$(jq -r '.PlatformType' resource.json)
         echo "platform_type=$platform_type" >> $GITHUB_ENV
         echo "Platform type is $platform_type"
-        
+
         resources=$(jq '.Resources | length' resource.json)
         echo "num_resources=$resources" >> $GITHUB_ENV
         echo "Number of resources is $resources"
@@ -55,25 +63,28 @@ jobs:
           echo "Resource $i: type=$resource_type, name=$resource_name, config=$resource"
         done
 
+    # Configure Terraform CLI
     - name: Configure Terraform
       uses: hashicorp/setup-terraform@v1
       with:
         terraform_version: 1.0.11
 
+    # Set up AWS credentials from secrets if applicable
     - name: Configure AWS credentials
       if: env.platform_type == 'AWS'
       uses: aws-actions/configure-aws-credentials@v1
       with:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: us-east-1
+        aws-region: us-east-1  # Update to the appropriate AWS region
 
+    # Create AWS resources based on parsed JSON configuration
     - name: Create AWS Resources
       if: env.platform_type == 'AWS'
       run: |
         num_resources=${{ env.num_resources }}
-        rm -f main.tf
-        
+        rm -f main.tf   # Ensure main.tf is clean before starting
+
         for ((i=0; i<$num_resources; i++)); do
           resource_type=$(eval echo "\${resource_${i}_type}")
           resource_name=$(eval echo "\${resource_${i}_name}")
@@ -110,12 +121,10 @@ jobs:
         terraform init
         terraform apply -auto-approve
 
+    # Processing resources for Databricks
     - name: Process Databricks
       if: ${{ env.platform_type == 'DATABRICK' }}
       run: |
-        export DATABRICKS_HOST=${{ secrets.DATABRICKS_HOST }}
-        export DATABRICKS_TOKEN=${{ secrets.DATABRICKS_TOKEN }}
-
         num_resources=${{ env.num_resources }}
 
         for ((i=0; i<$num_resources; i++)); do
@@ -143,6 +152,7 @@ jobs:
           esac
         done
 
+    # Processing resources for Snowflake
     - name: Process Snowflake
       if: ${{ env.platform_type == 'DATAFLAKE' }}
       run: |
