@@ -14,73 +14,72 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v2
 
+    - name: Install jq tool for JSON processing
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y jq
+
     - name: Install and Upgrade Python Packages
       run: |
-        sudo apt-get install -y python3-pip
+        sudo apt-get install -y python3-pip expect
         pip3 install --upgrade "urllib3<2" "chardet<4" requests
 
     - name: Install Databricks CLI
       run: |
         pip3 install databricks-cli
 
-    - name: Parse JSON file and save environment variables
-      id: parse_json
+    - name: Configure Databricks CLI using expect
       run: |
-        python3 <<EOF
-        import json
-
-        with open('resource.json') as f:
-            data = json.load(f)
-        
-        platform_type = data['PlatformType']
-        num_resources = len(data['Resources'])
-        
-        # Save platform_type and num_resources for later steps
-        with open('outputs/platform_type.txt', 'w') as f:
-            f.write(platform_type)
-        
-        with open('outputs/num_resources.txt', 'w') as f:
-            f.write(str(num_resources))
-        
-        # Save all resources individually for later processing
-        for i, resource in enumerate(data['Resources']):
-            with open(f'outputs/resource_{i}_type.txt', 'w') as f:
-                f.write(resource['ResourceType'])
-                
-            with open(f'outputs/resource_{i}_name.txt', 'w') as f:
-                f.write(resource['ResourceName'])
-                
-            with open(f'outputs/resource_{i}_config.json', 'w') as f:
-                json.dump(resource, f)
+        expect <<EOF
+        spawn databricks configure --token
+        expect "Databricks Host (should begin with https://):"
+        send "${{ secrets.DATABRICKS_HOST }}\r"
+        expect "Token:"
+        send "${{ secrets.DATABRICKS_TOKEN }}\r"
+        expect eof
         EOF
 
-    - name: Load platform type and number of resources
-      id: load_platform
+    - name: Verify Databricks CLI Configuration
       run: |
-        platform_type=$(cat outputs/platform_type.txt)
-        num_resources=$(cat outputs/num_resources.txt)
-        
-        echo "::set-output name=platform_type::$platform_type"
-        echo "::set-output name=num_resources::$num_resources"
-        
+        databricks clusters list
+
+    - name: Parse JSON file and set environment variables
+      id: parse_json
+      run: |
+        platform_type=$(jq -r '.PlatformType' resource.json)
+        echo "platform_type=$platform_type" >> $GITHUB_ENV
         echo "Platform type is $platform_type"
-        echo "Number of resources is $num_resources"
+        
+        resources=$(jq '.Resources | length' resource.json)
+        echo "num_resources=$resources" >> $GITHUB_ENV
+        echo "Number of resources is $resources"
+
+        for ((i=0; i<$resources; i++)); do
+          resource=$(jq -c .Resources[$i] resource.json)
+          resource_type=$(echo $resource | jq -r '.ResourceType')
+          resource_name=$(echo $resource | jq -r '.ResourceName')
+          echo "resource_${i}_type=$resource_type" >> $GITHUB_ENV
+          echo "resource_${i}_name=$resource_name" >> $GITHUB_ENV
+          echo "resource_${i}_config=$resource" >> $GITHUB_ENV
+
+          echo "Resource $i: type=$resource_type, name=$resource_name, config=$resource"
+        done
 
     - name: Configure Terraform
       uses: hashicorp/setup-terraform@v1
       with:
         terraform_version: 1.0.11
-        
-    - name: Create AWS Resources
-      if: steps.load_platform.outputs.platform_type == 'AWS'
-      run: |
-        num_resources=$(cat outputs/num_resources.txt)
-        rm -f main.tf  # Ensure main.tf is clean before starting
 
-        for i in $(seq 0 $((num_resources-1))); do
-          resource_type=$(cat outputs/resource_${i}_type.txt)
-          resource_name=$(cat outputs/resource_${i}_name.txt)
-          resource_config=$(cat outputs/resource_${i}_config.json)
+    - name: Create AWS Resources
+      if: env.platform_type == 'AWS'
+      run: |
+        num_resources=${{ env.num_resources }}
+        rm -f main.tf   # Ensure main.tf is clean before starting
+
+        for ((i=0; i<$num_resources; i++)); do
+          resource_type=$(eval echo "\${resource_${i}_type}")
+          resource_name=$(eval echo "\${resource_${i}_name}")
+          resource_config=$(eval echo "\${resource_${i}_config}")
 
           echo "Creating $resource_type named $resource_name"
 
@@ -91,8 +90,8 @@ jobs:
               }" >> main.tf
               ;;
             EC2)
-              ami=$(echo $resource_config | python3 -c 'import sys, json; print(json.load(sys.stdin)["Ami"])')
-              instance_type=$(echo $resource_config | python3 -c 'import sys, json; print(json.load(sys.stdin)["InstanceType"])')
+              ami=$(echo $resource_config | jq -r '.Ami')
+              instance_type=$(echo $resource_config | jq -r '.InstanceType')
               echo "resource \"aws_instance\" \"$resource_name\" {
                 ami           = \"$ami\"
                 instance_type = \"$instance_type\"
@@ -114,25 +113,25 @@ jobs:
         terraform apply -auto-approve
 
     - name: Process Databricks
-      if: steps.load_platform.outputs.platform_type == 'DATABRICK'
+      if: ${{ env.platform_type == 'DATABRICK' }}
       run: |
-        num_resources=$(cat outputs/num_resources.txt)
+        num_resources=${{ env.num_resources }}
 
-        for i in $(seq 0 $((num_resources-1))); do
-          resource_type=$(cat outputs/resource_${i}_type.txt)
-          resource_name=$(cat outputs/resource_${i}_name.txt)
-          resource_config=$(cat outputs/resource_${i}_config.json)
+        for ((i=0; i<$num_resources; i++)); do
+          resource_type=$(eval echo "\${resource_${i}_type}")
+          resource_name=$(eval echo "\${resource_${i}_name}")
+          resource_config=$(eval echo "\${resource_${i}_config}")
 
           echo "Creating Databricks resource: Type=$resource_type, Name=$resource_name"
 
           case $resource_type in
             CLUSTER)
-              cluster_config=$(echo $resource_config | python3 -c 'import sys, json; print(json.load(sys.stdin)["ClusterConfig"])')
+              cluster_config=$(echo $resource_config | jq -r '.ClusterConfig')
               echo "Setting up Databricks Cluster ${resource_name} with config ${cluster_config}"
               databricks clusters create --json "$cluster_config"
               ;;
             JOB)
-              job_config=$(echo $resource_config | python3 -c 'import sys, json; print(json.load(sys.stdin)["JobConfig"])')
+              job_config=$(echo $resource_config | jq -r '.JobConfig')
               echo "Setting up Databricks Job ${resource_name} with config ${job_config}"
               databricks jobs create --json "$job_config"
               ;;
@@ -144,18 +143,7 @@ jobs:
         done
 
     - name: Process Snowflake
-      if: steps.load_platform.outputs.platform_type == 'DATAFLAKE'
+      if: ${{ env.platform_type == 'DATAFLAKE' }}
       run: |
         echo "Processing Snowflake resources..."
-        num_resources=$(cat outputs/num_resources.txt)
-
-        for i in $(seq 0 $((num_resources-1))); do
-          resource_type=$(cat outputs/resource_${i}_type.txt)
-          resource_name=$(cat outputs/resource_${i}_name.txt)
-          resource_config=$(cat outputs/resource_${i}_config.json)
-
-          echo "Creating Snowflake resource: Type=$resource_type, Name=$resource_name"
-
-          # Add your Snowflake related commands here based on the resource_type and resource_config
-          
-        done
+        # Add your Snowflake related commands here
