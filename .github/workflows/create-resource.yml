@@ -45,6 +45,8 @@ jobs:
       if: env.platform_type == 'AWS'
       run: |
         num_resources=${{ env.num_resources }}
+        rm -f main.tf   # Ensure main.tf is clean before starting
+        
         for ((i=0; i<$num_resources; i++)); do
           resource_type=$(eval echo "\${resource_${i}_type}")
           resource_name=$(eval echo "\${resource_${i}_name}")
@@ -56,7 +58,7 @@ jobs:
             S3)
               echo "resource \"aws_s3_bucket\" \"$resource_name\" {
                 bucket = \"$resource_name\"
-              }" > main.tf
+              }" >> main.tf
               ;;
             EC2)
               ami=$(echo $resource_config | jq -r '.Ami')
@@ -64,25 +66,25 @@ jobs:
               echo "resource \"aws_instance\" \"$resource_name\" {
                 ami           = \"$ami\"
                 instance_type = \"$instance_type\"
-              }" > main.tf
+              }" >> main.tf
               ;;
             SNS)
               echo "resource \"aws_sns_topic\" \"$resource_name\" {
                 name = \"$resource_name\"
-              }" > main.tf
+              }" >> main.tf
               ;;
             *)
               echo "Unsupported resource type: $resource_type"
               exit 1
               ;;
           esac
-
-          terraform init
-          terraform apply -auto-approve
         done
 
+        terraform init
+        terraform apply -auto-approve
+
     - name: Process Databricks and Snowflake
-      if: env.platform_type == 'DATABRICK' || env.platform_type == 'DATAFLAKE'
+      if: ${{ env.platform_type == 'DATABRICK' || env.platform_type == 'DATAFLAKE' }}
       run: |
         if [ "${{ env.platform_type }}" == "DATABRICK" ]; then
           echo "Processing Databricks resources..."
