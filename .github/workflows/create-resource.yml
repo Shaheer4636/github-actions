@@ -11,81 +11,74 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # Checkout the repository
     - name: Checkout repository
       uses: actions/checkout@v2
 
-    # Install Databricks CLI
-    - name: Install Databricks CLI
+    - name: Install and Upgrade Python Packages
       run: |
         sudo apt-get install -y python3-pip
+        pip3 install --upgrade "urllib3<2" "chardet<4" requests
+
+    - name: Install Databricks CLI
+      run: |
         pip3 install databricks-cli
 
-    # Configure Databricks CLI
-    - name: Configure Databricks CLI
+    - name: Configure Databricks CLI using expect
       run: |
-        echo "${{ secrets.DATABRICKS_HOST }}\n${{ secrets.DATABRICKS_TOKEN }}" | databricks configure --token
+        sudo apt-get install -y expect
+        expect <<EOF
+        spawn databricks configure --token
+        expect "Databricks Host (should begin with https://):"
+        send "${{ secrets.DATABRICKS_HOST }}\r"
+        expect "Token:"
+        send "${{ secrets.DATABRICKS_TOKEN }}\r"
+        expect eof
+        EOF
 
-    # Parse the JSON file and set environment variables using Python
-    - name: Parse JSON file with Python
+    - name: Verify Databricks CLI Configuration
+      run: |
+        databricks clusters list
+
+    - name: Parse JSON file and set environment variables
       id: parse_json
       run: |
-        python3 - <<'EOF'
-import json
-import os
+        python3 <<EOF
+        import json
+        import os
 
-with open('resource.json') as f:
-    data = json.load(f)
+        with open('resource.json') as f:
+            data = json.load(f)
 
-platform_type = data.get('PlatformType')
-os.environ['platform_type'] = platform_type
-print(f"platform_type={platform_type}")
+        os.environ['platform_type'] = data['PlatformType']
+        print(f"::set-env name=platform_type::{data['PlatformType']}")
 
-resources = data.get('Resources', [])
-num_resources = len(resources)
-os.environ['num_resources'] = str(num_resources)
-print(f"num_resources={num_resources}")
+        resources = data['Resources']
+        os.environ['num_resources'] = str(len(resources))
+        print(f"::set-env name=num_resources::{len(resources)}")
 
-for i, resource in enumerate(resources):
-    resource_type = resource.get('ResourceType')
-    resource_name = resource.get('ResourceName')
-    resource_config = json.dumps(resource)
-    os.environ[f'resource_{i}_type'] = resource_type
-    os.environ[f'resource_{i}_name'] = resource_name
-    os.environ[f'resource_{i}_config'] = resource_config
-    print(f"resource_{i}_type={resource_type}")
-    print(f"resource_{i}_name={resource_name}")
-    print(f"resource_{i}_config={resource_config}")
+        for i, resource in enumerate(resources):
+            os.environ[f"resource_{i}_type"] = resource['ResourceType']
+            os.environ[f"resource_{i}_name"] = resource['ResourceName']
+            os.environ[f"resource_{i}_config"] = json.dumps(resource)
 
-env_file_path = os.getenv('GITHUB_ENV')
-with open(env_file_path, 'a') as env_file:
-    env_file.write(f"platform_type={platform_type}\n")
-    env_file.write(f"num_resources={num_resources}\n")
-    for i in range(num_resources):
-        env_file.write(f"resource_{i}_type={os.environ[f'resource_{i}_type']}\n")
-        env_file.write(f"resource_{i}_name={os.environ[f'resource_{i}_name']}\n")
-        env_file.write(f"resource_{i}_config={os.environ[f'resource_{i}_config']}\n")
-EOF
+            print(f"::set-env name=resource_{i}_type::{resource['ResourceType']}")
+            print(f"::set-env name=resource_{i}_name::{resource['ResourceName']}")
+            print(f"::set-env name=resource_{i}_config::{json.dumps(resource)}")
+
+            print(f"Resource {i}: type={resource['ResourceType']}, name={resource['ResourceName']}, config={resource}")
+        EOF
 
     - name: Configure Terraform
       uses: hashicorp/setup-terraform@v1
       with:
         terraform_version: 1.0.11
 
-    - name: Configure AWS credentials
-      if: env.platform_type == 'AWS'
-      uses: aws-actions/configure-aws-credentials@v1
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: us-east-1
-
     - name: Create AWS Resources
       if: env.platform_type == 'AWS'
       run: |
         num_resources=${{ env.num_resources }}
-        rm -f main.tf
-        
+        rm -f main.tf   # Ensure main.tf is clean before starting
+
         for ((i=0; i<$num_resources; i++)); do
           resource_type=$(eval echo "\${resource_${i}_type}")
           resource_name=$(eval echo "\${resource_${i}_name}")
@@ -100,8 +93,8 @@ EOF
               }" >> main.tf
               ;;
             EC2)
-              ami=$(echo $resource_config | python3 -c "import sys, json; print(json.load(sys.stdin)['Ami'])")
-              instance_type=$(echo $resource_config | python3 -c "import sys, json; print(json.load(sys.stdin)['InstanceType'])")
+              ami=$(echo $resource_config | jq -r '.Ami')
+              instance_type=$(echo $resource_config | jq -r '.InstanceType')
               echo "resource \"aws_instance\" \"$resource_name\" {
                 ami           = \"$ami\"
                 instance_type = \"$instance_type\"
@@ -125,9 +118,6 @@ EOF
     - name: Process Databricks
       if: ${{ env.platform_type == 'DATABRICK' }}
       run: |
-        export DATABRICKS_HOST=${{ secrets.DATABRICKS_HOST }}
-        export DATABRICKS_TOKEN=${{ secrets.DATABRICKS_TOKEN }}
-
         num_resources=${{ env.num_resources }}
 
         for ((i=0; i<$num_resources; i++)); do
@@ -139,12 +129,12 @@ EOF
 
           case $resource_type in
             CLUSTER)
-              cluster_config=$(echo $resource_config | python3 -c "import sys, json; print(json.load(sys.stdin)['ClusterConfig'])")
+              cluster_config=$(echo $resource_config | jq -r '.ClusterConfig')
               echo "Setting up Databricks Cluster ${resource_name} with config ${cluster_config}"
               databricks clusters create --json "$cluster_config"
               ;;
             JOB)
-              job_config=$(echo $resource_config | python3 -c "import sys, json; print(json.load(sys.stdin)['JobConfig'])")
+              job_config=$(echo $resource_config | jq -r '.JobConfig')
               echo "Setting up Databricks Job ${resource_name} with config ${job_config}"
               databricks jobs create --json "$job_config"
               ;;
