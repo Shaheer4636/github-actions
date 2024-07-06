@@ -39,7 +39,7 @@ jobs:
     - name: Configure Terraform
       uses: hashicorp/setup-terraform@v1
       with:
-        terraform_version: 1.0.11
+        terraform_version: 4.1.0  # Updated to required version
 
     - name: Create AWS Resources
       if: env.platform_type == 'AWS'
@@ -47,6 +47,13 @@ jobs:
         num_resources=${{ env.num_resources }}
         rm -f main.tf   # Ensure main.tf is clean before starting
         
+        # Add a provider block for the AWS provider
+        cat <<EOF > main.tf
+        provider "aws" {
+          region = "us-east-1" # Specify your region or parameterize
+        }
+        EOF
+
         for ((i=0; i<$num_resources; i++)); do
           resource_type=$(eval echo "\${resource_${i}_type}")
           resource_name=$(eval echo "\${resource_${i}_name}")
@@ -56,22 +63,28 @@ jobs:
           
           case $resource_type in
             S3)
-              echo "resource \"aws_s3_bucket\" \"$resource_name\" {
-                bucket = \"$resource_name\"
-              }" >> main.tf
+              cat <<EOF >> main.tf
+              resource "aws_s3_bucket" "$resource_name" {
+                bucket = "$resource_name"
+              }
+              EOF
               ;;
             EC2)
               ami=$(echo $resource_config | jq -r '.Ami')
               instance_type=$(echo $resource_config | jq -r '.InstanceType')
-              echo "resource \"aws_instance\" \"$resource_name\" {
-                ami           = \"$ami\"
-                instance_type = \"$instance_type\"
-              }" >> main.tf
+              cat <<EOF >> main.tf
+              resource "aws_instance" "$resource_name" {
+                ami           = "$ami"
+                instance_type = "$instance_type"
+              }
+              EOF
               ;;
             SNS)
-              echo "resource \"aws_sns_topic\" \"$resource_name\" {
-                name = \"$resource_name\"
-              }" >> main.tf
+              cat <<EOF >> main.tf
+              resource "aws_sns_topic" "$resource_name" {
+                name = "$resource_name"
+              }
+              EOF
               ;;
             *)
               echo "Unsupported resource type: $resource_type"
@@ -81,6 +94,7 @@ jobs:
         done
 
         terraform init
+        terraform plan  # Run plan to see the changes
         terraform apply -auto-approve
 
     - name: Process Databricks and Snowflake
