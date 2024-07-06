@@ -9,7 +9,7 @@
           "ResourceType": "EC2",
           "ResourceName": "my-ec2-instance",
           "Ami": "ami-12345678",
-          "InstanceType": "t2.micro"
+          "InstanceType": "t3.micro"
         }
       ]
     }
